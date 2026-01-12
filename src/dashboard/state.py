@@ -36,7 +36,7 @@ class OpportunityStore:
         self._max_items = max_items
         self._lock = asyncio.Lock()
         self._items: Dict[str, Opportunity] = {}
-        self._conns: Set[_Conn] = set()
+        self._conns: list[_Conn] = []
 
         self.total_published = 0
         self.total_expired = 0
@@ -103,7 +103,7 @@ class OpportunityStore:
 
     def register_conn(self) -> _Conn:
         c = _Conn(queue=asyncio.Queue(maxsize=500))
-        self._conns.add(c)
+        self._conns.append(c) 
         return c
 
     def unregister_conn(self, c: _Conn) -> None:
