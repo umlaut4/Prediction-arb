@@ -1,0 +1,6 @@
+polymarket:
+  name: Polymarket
+  ws_enabled: true
+kalshi:
+  name: Kalshi
+  ws_enabled: true

@@ -1,0 +1,9 @@
+# Fee model is intentionally conservative; tune per-venue as you integrate real connectors.
+venues:
+  polymarket:
+    taker_fee_bps: 50   # 0.50%
+  kalshi:
+    taker_fee_bps: 70   # 0.70%
+assumptions:
+  slippage_buffer_bps: 25
+  latency_buffer_bps: 10

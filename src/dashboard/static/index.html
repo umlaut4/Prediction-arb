@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Prediction Arb Dashboard</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; margin: 20px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .card { border: 1px solid #ddd; border-radius: 10px; padding: 12px 14px; background: #fff; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { padding: 10px 8px; border-bottom: 1px solid #eee; text-align: left; }
+    th { position: sticky; top: 0; background: #fafafa; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .pill { display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #ddd; font-size:12px; }
+    .good { border-color:#b6e3b6; background:#f0fff0; }
+    .warn { border-color:#ffe3a3; background:#fffaf0; }
+    .bad  { border-color:#ffb6b6; background:#fff0f0; }
+    .right { text-align:right; }
+    .muted { color:#666; }
+  </style>
+</head>
+<body>
+  <h2>Prediction Market Arbitrage — Dashboard (v1)</h2>
+
+  <div class="row">
+    <div class="card">
+      <div class="muted">Connection</div>
+      <div id="conn" class="pill warn">connecting…</div>
+    </div>
+    <div class="card">
+      <div class="muted">Server time</div>
+      <div id="serverTime" class="mono">—</div>
+    </div>
+    <div class="card">
+      <div class="muted">Filters</div>
+      <div class="row">
+        <label>Min ROI% <input id="minRoi" type="number" step="0.1" value="0.5" style="width:90px"></label>
+        <label>Min Conf <input id="minConf" type="number" step="0.01" value="0.8" style="width:90px"></label>
+        <label>Min Size $ <input id="minSize" type="number" step="1" value="25" style="width:90px"></label>
+        <label>Market
+          <select id="market">
+            <option value="">All</option>
+            <option value="moneyline">Moneyline</option>
+            <option value="spread">Spread</option>
+            <option value="total">Total</option>
+          </select>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Event</th>
+        <th>Market</th>
+        <th class="right">ROI%</th>
+        <th class="right">Size $</th>
+        <th class="right">Conf</th>
+        <th>Leg A</th>
+        <th>Leg B</th>
+        <th>Updated</th>
+        <th>Expires</th>
+        <th class="mono">ID</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+<script>
+  const rowsEl = document.getElementById('rows');
+  const connEl = document.getElementById('conn');
+  const serverTimeEl = document.getElementById('serverTime');
+
+  const state = new Map();
+
+  function num(id){
+    const v = parseFloat(document.getElementById(id).value);
+    return Number.isFinite(v) ? v : 0;
+  }
+
+  function str(id){
+    return document.getElementById(id).value;
+  }
+
+  function pillClassForRoi(roi){
+    if (roi >= 2.0) return 'pill good';
+    if (roi >= 0.5) return 'pill warn';
+    return 'pill bad';
+  }
+
+  function fmtTs(iso){
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString();
+    } catch { return iso; }
+  }
+
+  function passesFilters(o){
+    if (o.roi_pct < num('minRoi')) return false;
+    if (o.confidence < num('minConf')) return false;
+    if (o.size_usd < num('minSize')) return false;
+    const m = str('market');
+    if (m && o.market_type !== m) return false;
+    return true;
+  }
+
+  function render(){
+    const items = Array.from(state.values())
+      .filter(passesFilters)
+      .sort((a,b) => (b.roi_pct - a.roi_pct) || (new Date(b.updated_at) - new Date(a.updated_at)));
+
+    rowsEl.innerHTML = '';
+    for (const o of items){
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${o.event_name}<div class="muted">${fmtTs(o.start_time)}</div></td>
+        <td><span class="pill">${o.market_type}</span></td>
+        <td class="right"><span class="${pillClassForRoi(o.roi_pct)}">${o.roi_pct.toFixed(2)}%</span></td>
+        <td class="right">${o.size_usd.toFixed(0)}</td>
+        <td class="right">${o.confidence.toFixed(2)}</td>
+        <td>${o.leg_a_venue}: ${o.leg_a_desc}</td>
+        <td>${o.leg_b_venue}: ${o.leg_b_desc}</td>
+        <td>${fmtTs(o.updated_at)}</td>
+        <td>${fmtTs(o.expires_at)}</td>
+        <td class="mono">${o.id}</td>
+      `;
+      rowsEl.appendChild(tr);
+    }
+  }
+
+  ['minRoi','minConf','minSize','market'].forEach(id => {
+    document.getElementById(id).addEventListener('input', render);
+    document.getElementById(id).addEventListener('change', render);
+  });
+
+  function setConn(status, cls){
+    connEl.textContent = status;
+    connEl.className = cls;
+  }
+
+  function connect(){
+    const proto = (location.protocol === 'https:') ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${location.host}/ws/opportunities`);
+
+    ws.onopen = () => setConn('live', 'pill good');
+
+    ws.onmessage = (ev) => {
+      let msg;
+      try {
+        if (typeof ev.data === 'string') msg = JSON.parse(ev.data);
+        else msg = JSON.parse(new TextDecoder().decode(ev.data));
+      } catch(e){
+        return;
+      }
+
+      if (msg.type === 'snapshot'){
+        serverTimeEl.textContent = fmtTs(msg.data.server_time);
+        state.clear();
+        for (const o of msg.data.opportunities) state.set(o.id, o);
+        render();
+      } else if (msg.type === 'opportunity'){
+        state.set(msg.data.id, msg.data);
+        render();
+      } else if (msg.type === 'expired'){
+        state.delete(msg.id);
+        render();
+      }
+    };
+
+    ws.onclose = () => {
+      setConn('disconnected', 'pill bad');
+      setTimeout(connect, 800);
+    };
+
+    ws.onerror = () => {
+      setConn('error', 'pill bad');
+      ws.close();
+    };
+  }
+
+  connect();
+</script>
+</body>
+</html>

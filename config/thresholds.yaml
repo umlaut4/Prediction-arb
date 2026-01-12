@@ -1,0 +1,4 @@
+confidence_min: 0.8
+roi_min_pct: 0.5
+min_size_usd: 25
+max_quote_age_ms: 2000

@@ -1,0 +1,6 @@
+scope:
+  league: NBA
+  markets:
+    - moneyline
+    - spread
+    - total
